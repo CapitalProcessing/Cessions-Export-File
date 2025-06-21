@@ -1,0 +1,35 @@
+Private Sub btnProcessSingle_Click()
+    ProcessSingle
+End Sub
+
+Private Sub btnProcessTemplate_Click()
+    ProcessTemplate
+End Sub
+
+Private Sub btnProcessAllTemplates_Click()
+    ProcessAllTemplates
+End Sub
+Private Sub Worksheet_Change(ByVal Target As Range)
+    If Not Intersect(Target, Me.Range("H3")) Is Nothing Then
+        Dim wsList As Worksheet
+        Dim rngSpill As Range
+        Dim firstVal As Variant
+        Dim cell As Range
+
+        Set wsList = ThisWorkbook.Sheets("Lists")
+        ' Adjust if spill range ever moves from B4
+        Set rngSpill = wsList.Range("B4:B103")
+
+        firstVal = ""
+        For Each cell In rngSpill
+            If Trim(cell.Value) <> "" Then
+                firstVal = cell.Value
+                Exit For
+            End If
+        Next cell
+
+        Application.EnableEvents = False
+        Me.Range("B2").Value = firstVal
+        Application.EnableEvents = True
+    End If
+End Sub
