@@ -1,0 +1,139 @@
+Sub ProcessItems()
+    Dim ws As Worksheet
+    Dim itemList As Variant
+    Dim nonEmptyItems() As String
+    Dim i As Integer, itemCount As Integer
+    Dim originalSheet As Worksheet
+    Dim rng As Range
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessItems"
+
+    ' Unhide and switch to the "Processing" sheet
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = False
+        .Calculation = xlCalculationManual
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVisible
+        ThisWorkbook.Sheets("Processing").Activate
+        .DisplayFullScreen = True
+        .DisplayFormulaBar = False
+        .DisplayStatusBar = False
+        .CommandBars("Ribbon").Visible = False
+        .ActiveWindow.DisplayGridlines = False
+    End With
+    DoEvents
+    Debug.Print "Switched to Processing sheet"
+
+    ' Store the original sheet
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    Debug.Print "Original sheet set"
+
+    ' Set the worksheet
+    Set ws = ThisWorkbook.Sheets("Auto")
+    Debug.Print "Worksheet set to Auto"
+
+    ' Check if the named range "Legal_Name" exists
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names("Legal_Name").RefersToRange
+    If rng Is Nothing Then
+        MsgBox "The named range 'Legal_Name' does not exist."
+        Debug.Print "Named range 'Legal_Name' does not exist"
+        GoTo Cleanup
+    End If
+    On Error GoTo 0
+    Debug.Print "Named range 'Legal_Name' exists"
+
+    ' Convert the range to an array
+    itemList = rng.Value
+    Debug.Print "Items retrieved from named range 'Legal_Name'"
+
+    ' Debugging: Print the type and value of itemList
+    Debug.Print "Type of itemList: " & TypeName(itemList)
+    If IsArray(itemList) Then
+        Debug.Print "itemList is an array with " & UBound(itemList, 1) & " rows."
+    Else
+        Debug.Print "itemList is not an array."
+        MsgBox "The named range 'Legal_Name' did not return an array."
+        GoTo Cleanup
+    End If
+
+    ' Create an array with non-empty items only
+    itemCount = 0
+    For i = 1 To UBound(itemList, 1)
+        If itemList(i, 1) <> "" Then
+            itemCount = itemCount + 1
+            ReDim Preserve nonEmptyItems(1 To itemCount)
+            nonEmptyItems(itemCount) = itemList(i, 1)
+        End If
+    Next i
+    Debug.Print "Non-empty items array created"
+
+    ' Debugging: Print the nonEmptyItems array
+    For i = 1 To itemCount
+        Debug.Print "nonEmptyItems(" & i & "): " & nonEmptyItems(i)
+    Next i
+
+    ' Loop through each non-empty item
+    For i = 1 To itemCount
+        ' Update the progress indicator
+        ThisWorkbook.Sheets("Processing").Range("O36").Value = "Processing item " & i & " of " & itemCount
+        DoEvents
+
+        ' Set the drop-down list cell to the current item
+        ws.Range("B2").Value = nonEmptyItems(i)
+
+        ' Force recalculation to ensure the change is registered
+        Application.CalculateFull
+
+        ' Explicitly recalculate the specific cells in Sheet5
+        Sheet5.Range("N3:N8").Calculate
+
+        ' Allow the system to process other events
+        DoEvents
+
+        ' Add a small delay
+        Application.Wait (Now + TimeValue("0:00:02"))
+
+        ' Debugging message
+        Debug.Print "Processing item: " & nonEmptyItems(i)
+        Debug.Print "Value in ws.Range('B2'): " & ws.Range("B2").Value
+
+        ' Call SaveAlteredWorkbook to handle alterations and saving
+        SaveAlteredWorkbook ws, nonEmptyItems(i)
+    Next i
+
+Cleanup:
+    ' Restore the original view settings and switch back to the original sheet
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = True
+        .Calculation = xlCalculationAutomatic
+        .DisplayFullScreen = False
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+        .CommandBars("Ribbon").Visible = True
+        originalSheet.Activate
+        .ActiveWindow.DisplayGridlines = True
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+        .ScreenUpdating = True
+    End With
+    Debug.Print "ProcessItems completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    With Application
+        .EnableEvents = True
+        .Calculation = xlCalculationAutomatic
+        .DisplayFullScreen = False
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+        .CommandBars("Ribbon").Visible = True
+        originalSheet.Activate
+        .ActiveWindow.DisplayGridlines = True
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    End With
+    MsgBox "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+End Sub
