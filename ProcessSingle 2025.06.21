@@ -1,0 +1,101 @@
+Sub ProcessSingle()
+    Dim ws As Worksheet
+    Dim selectedItem As String
+    Dim originalSheet As Worksheet
+
+    ' Set reference to original sheet immediately for error handler protection
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    Set ws = originalSheet
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessSingle"
+
+    With Application
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVisible
+        ThisWorkbook.Sheets("Processing").Activate
+        .DisplayFullScreen = True
+        .DisplayFormulaBar = False
+        .DisplayStatusBar = False
+        .CommandBars("Ribbon").Visible = False
+        .ActiveWindow.DisplayGridlines = False
+    End With
+    DoEvents
+    Debug.Print "Switched to Processing sheet"
+
+    selectedItem = ws.Range("B2").Value
+    If selectedItem = "" Then
+        MsgBox "Please select a Legal Name from the drop-down list in cell B2."
+        GoTo Cleanup
+    End If
+
+    Debug.Print "Selected item: " & selectedItem
+
+    ThisWorkbook.Sheets("Processing").Range("O36").Value = "Processing single item"
+    DoEvents
+
+    ' === State synchronization: BEGIN ===
+    ws.Range("B2").Value = selectedItem
+    Application.CalculateFull
+    Sheet5.Range("N3:N8").Calculate
+    DoEvents
+    Application.Wait (Now + TimeValue("0:00:01"))
+    DoEvents
+    Debug.Print "Processing item: " & selectedItem
+    Debug.Print "Value in ws.Range('B2'): " & ws.Range("B2").Value
+    Debug.Print "Value in Harvested Data!D5: [" & Worksheets("Harvested Data").Range("D5").Value & "]"
+    ' === State synchronization: END ===
+
+    SaveAlteredWorkbook ws, selectedItem
+
+    ' === MOMENT: Give Excel time to finalize Save/Close before summary row ===
+    DoEvents
+    Worksheets("Harvested Data").Calculate
+    DoEvents
+
+    UpdateOrCreateSummaryRow
+    Call SortAndProtectSummary
+
+Cleanup:
+    Application.ScreenUpdating = False
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+    Application.ScreenUpdating = True
+
+    Debug.Print "ProcessSingle completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    On Error Resume Next
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    On Error GoTo 0
+    MsgBox "An error occurred in ProcessSingle: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessSingle: " & Err.Description & " at line " & Erl
+    GoTo Cleanup
+End Sub
+
+Sub CheckPathCharacters(path As String)
+    Dim i As Integer
+    For i = 1 To Len(path)
+        Debug.Print Mid(path, i, 1) & " - " & Asc(Mid(path, i, 1))
+    Next i
+End Sub
