@@ -1,0 +1,412 @@
+Sub ProcessItems()
+    Dim ws As Worksheet
+    Dim itemList As Variant
+    Dim nonEmptyItems() As String
+    Dim i As Integer, itemCount As Integer
+    Dim originalSheet As Worksheet
+    Dim rng As Range
+
+    ' Set reference to original sheet immediately for error handler protection
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    Set ws = originalSheet
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessItems"
+
+    ' --- [unchanged initialization code] ---
+    ' You should have code here that populates nonEmptyItems() and sets itemCount
+    ' For example:
+    ' Set rng = ws.Range("B4:B103")
+    ' itemList = rng.Value
+    ' For i = 1 To UBound(itemList, 1)
+    '     If Trim(itemList(i, 1)) <> "" Then
+    '         itemCount = itemCount + 1
+    '         ReDim Preserve nonEmptyItems(1 To itemCount)
+    '         nonEmptyItems(itemCount) = itemList(i, 1)
+    '     End If
+    ' Next i
+
+    ' Exit if there are no items
+    If itemCount = 0 Then
+        GoTo Cleanup
+    End If
+
+    ' Loop through each non-empty item
+    For i = 1 To itemCount
+        ' Update the progress indicator
+        ThisWorkbook.Sheets("Processing").Range("O36").Value = "Processing item " & i & " of " & itemCount
+        DoEvents
+
+        ' Set the drop-down list cell to the current item
+        ws.Range("B2").Value = nonEmptyItems(i)
+
+        ' === State synchronization: BEGIN ===
+        ' Force recalculation to ensure the change is registered
+        Application.CalculateFull
+        ' If you have volatile/dependent formulas, also recalculate specific sheets/cells as needed
+        Sheet5.Range("N3:N8").Calculate
+        ' Allow Excel to process pending events
+        DoEvents
+        ' (Optional) Short wait to ensure Excel UI/formulas have caught up
+        Application.Wait (Now + TimeValue("0:00:01"))
+        DoEvents
+        ' Debugging: Confirm the correct value is now in B2 and D5
+        Debug.Print "Processing item: " & nonEmptyItems(i)
+        Debug.Print "Value in ws.Range('B2'): " & ws.Range("B2").Value
+        Debug.Print "Value in Harvested Data!D5: [" & Worksheets("Harvested Data").Range("D5").Value & "]"
+        ' === State synchronization: END ===
+
+        ' Call SaveAlteredWorkbook to handle alterations and saving
+        SaveAlteredWorkbook ws, nonEmptyItems(i)
+
+        ' Give Excel time to finalize Save/Close before summary row
+        DoEvents
+        Worksheets("Harvested Data").Calculate
+        DoEvents
+
+        ' Call summary update
+        UpdateOrCreateSummaryRow
+
+        ' (Optional) micro-pause between items for Excel stability
+        DoEvents
+    Next i
+
+Cleanup:
+    ' Restore the original view settings and switch back to the original sheet
+    Application.ScreenUpdating = False
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+    Application.ScreenUpdating = True
+
+    ' (Optional) Reset dropdown to neutral/first item and force sync for next segment
+    If itemCount > 0 Then
+        ws.Range("B2").Value = nonEmptyItems(1)
+    End If
+    Application.CalculateFull
+    DoEvents
+    Debug.Print "ProcessItems completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    On Error Resume Next
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    On Error GoTo 0
+    MsgBox "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+    GoTo Cleanup
+End Sub
+
+Function CleanString(inputString As String) As String
+    Dim cleanedString As String
+    Dim i As Integer
+    Dim charCode As Integer
+    
+    cleanedString = Trim(inputString)
+    cleanedString = Replace(cleanedString, Chr(160), " ")
+    For i = 1 To Len(cleanedString)
+        charCode = Asc(Mid(cleanedString, i, 1))
+        If charCode < 32 Or charCode > 126 Then
+            cleanedString = Replace(cleanedString, Mid(cleanedString, i, 1), "")
+        End If
+    Next i
+    cleanedString = Replace(cleanedString, "*", "")
+    cleanedString = Replace(cleanedString, "?", "")
+    cleanedString = Replace(cleanedString, """", "")
+    cleanedString = Replace(cleanedString, "<", "")
+    cleanedString = Replace(cleanedString, ">", "")
+    cleanedString = Replace(cleanedString, "|", "")
+    CleanString = cleanedString
+End Function
+
+Sub CreateDirectoryPath(path As String)
+    Dim fso As Object
+    Dim parentPath As String
+    Dim pathParts() As String
+    Dim i As Integer
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    pathParts = Split(path, "\")
+    If Left(path, 2) = "\\" Then
+        parentPath = "\\" & pathParts(2) & "\" & pathParts(3) & "\"
+        i = 4
+    Else
+        parentPath = pathParts(0) & "\"
+        i = 1
+    End If
+    For i = i To UBound(pathParts)
+        parentPath = parentPath & pathParts(i) & "\"
+        Debug.Print "Checking path: " & parentPath
+        If Not fso.FolderExists(parentPath) Then
+            Debug.Print "Creating folder: " & parentPath
+            fso.CreateFolder parentPath
+        End If
+    Next i
+End Sub
+
+Function SaveAlteredWorkbook(wsAuto As Worksheet, itemName As String) As Workbook
+    Dim tempWorkbook As Workbook
+    Dim originalWorkbook As Workbook
+    Dim directoryPath As String
+    Dim fileName As String
+    Dim fullPath As String
+    Dim tempFilePath As String
+    Dim vbComponent As Object
+    Dim invalidChars As String
+    Dim i As Integer
+
+    On Error GoTo ErrorHandler
+    Application.ScreenUpdating = False
+
+    Set originalWorkbook = ThisWorkbook
+    Debug.Print "Original workbook: " & originalWorkbook.Name
+
+    directoryPath = CleanString(Sheet5.Range("N8").Value)
+    fileName = CleanString(Sheet5.Range("N5").Value)
+    Debug.Print "N8 (directory path): " & directoryPath & " (Length: " & Len(directoryPath) & ")"
+    Debug.Print "N5 (file name): " & fileName & " (Length: " & Len(fileName) & ")"
+
+    Debug.Print "Ensuring directory path exists..."
+    CreateDirectoryPath directoryPath
+    Debug.Print "Directory path ensured."
+
+    fullPath = directoryPath & "\" & fileName
+    tempFilePath = directoryPath & "\temp_" & fileName
+    Debug.Print "Constructed file path: " & fullPath & " (Length: " & Len(fullPath) & ")"
+    Debug.Print "Constructed temporary file path: " & tempFilePath & " (Length: " & Len(tempFilePath) & ")"
+
+    Debug.Print "Checking for hidden characters..."
+    Call CheckPathCharacters(fullPath)
+    Debug.Print "Hidden characters check completed."
+
+    If Len(fullPath) > 255 Then
+        MsgBox "The file path is too long: " & fullPath
+        Debug.Print "The file path is too long: " & fullPath
+        GoTo Cleanup
+    End If
+
+    invalidChars = "<>""/|?*"
+    For i = 1 To Len(invalidChars)
+        If InStr(fullPath, Mid(invalidChars, i, 1)) > 0 Then
+            MsgBox "The file path contains invalid characters: " & fullPath
+            Debug.Print "The file path contains invalid characters: " & fullPath
+            GoTo Cleanup
+        End If
+    Next i
+
+    If Dir(fullPath) <> "" Then
+        Debug.Print "Deleting existing file: " & fullPath
+        Kill fullPath
+        Debug.Print "Existing file deleted."
+    End If
+
+    On Error Resume Next
+    Debug.Print "Saving original workbook as a copy..."
+    originalWorkbook.SaveCopyAs tempFilePath
+    If Err.Number <> 0 Then
+        MsgBox "Error saving the workbook as a copy: " & Err.Description
+        Debug.Print "Error saving the workbook as a copy: " & Err.Description
+        Err.Clear
+        GoTo Cleanup
+    End If
+    On Error GoTo 0
+    Debug.Print "Saved workbook as a copy with temporary name."
+
+    Debug.Print "Opening the copied workbook..."
+    Set tempWorkbook = Workbooks.Open(tempFilePath)
+    Debug.Print "Opened temporary workbook: " & tempWorkbook.Name
+
+    On Error Resume Next
+    Debug.Print "Hiding the Processing sheet..."
+    tempWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    On Error GoTo 0
+    Debug.Print "Processing sheet hidden."
+
+    Debug.Print "Unprotecting sheets in the temporary workbook..."
+    UnprotectSheets tempWorkbook
+    Debug.Print "Sheets unprotected."
+
+    Debug.Print "Performing copy-paste operations..."
+    PerformCopyPaste tempWorkbook
+    Debug.Print "Copy-paste operations performed."
+
+    Debug.Print "Breaking links..."
+    BreakLinks tempWorkbook
+    Debug.Print "Links broken."
+
+    Debug.Print "Protecting sheets in the temporary workbook..."
+    ProtectSheets tempWorkbook
+    Debug.Print "Sheets protected."
+
+    On Error Resume Next
+    Debug.Print "Removing Module2 from the copied workbook..."
+    Set vbComponent = tempWorkbook.VBProject.VBComponents("Module2")
+    tempWorkbook.VBProject.VBComponents.Remove vbComponent
+    On Error GoTo 0
+    Debug.Print "Module2 removed from the copied workbook."
+
+    Application.DisplayAlerts = False
+    On Error Resume Next
+    Debug.Print "Saving the temporary workbook with the correct file name and format..."
+    tempWorkbook.SaveAs fileName:=fullPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled, ConflictResolution:=xlLocalSessionChanges
+    If Err.Number <> 0 Then
+        MsgBox "Error saving the workbook in SaveAlteredWorkbook: " & Err.Description
+        Debug.Print "Error saving the workbook in SaveAlteredWorkbook: " & Err.Description
+        Err.Clear
+        Application.DisplayAlerts = True
+        GoTo Cleanup
+    End If
+    On Error GoTo 0
+    Debug.Print "Saved workbook as: " & fullPath
+
+    Application.DisplayAlerts = True
+
+    Debug.Print "Closing the temporary workbook..."
+    tempWorkbook.Close SaveChanges:=False
+    Debug.Print "Closed temporary workbook."
+
+    If Dir(tempFilePath) <> "" Then
+        Debug.Print "Deleting temporary file: " & tempFilePath
+        Kill tempFilePath
+        Debug.Print "Deleted temporary file: " & tempFilePath
+    End If
+
+    Debug.Print "Reactivating the original workbook..."
+    originalWorkbook.Activate
+    Debug.Print "Reactivated original workbook: " & originalWorkbook.Name
+
+    Application.ScreenUpdating = True
+    Set SaveAlteredWorkbook = tempWorkbook
+    Exit Function
+
+Cleanup:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Set SaveAlteredWorkbook = Nothing
+    Exit Function
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    MsgBox "An error occurred in SaveAlteredWorkbook: " & Err.Description
+    Debug.Print "An error occurred in SaveAlteredWorkbook: " & Err.Description
+    Set SaveAlteredWorkbook = Nothing
+End Function
+Sub ProcessSingle()
+    Dim ws As Worksheet
+    Dim selectedItem As String
+    Dim originalSheet As Worksheet
+
+    ' Set reference to original sheet immediately for error handler protection
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    Set ws = originalSheet
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessSingle"
+
+    With Application
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVisible
+        ThisWorkbook.Sheets("Processing").Activate
+        .DisplayFullScreen = True
+        .DisplayFormulaBar = False
+        .DisplayStatusBar = False
+        .CommandBars("Ribbon").Visible = False
+        .ActiveWindow.DisplayGridlines = False
+    End With
+    DoEvents
+    Debug.Print "Switched to Processing sheet"
+
+    selectedItem = ws.Range("B2").Value
+    If selectedItem = "" Then
+        MsgBox "Please select a Legal Name from the drop-down list in cell B2."
+        GoTo Cleanup
+    End If
+
+    Debug.Print "Selected item: " & selectedItem
+
+    ThisWorkbook.Sheets("Processing").Range("O36").Value = "Processing single item"
+    DoEvents
+
+    ' === State synchronization: BEGIN ===
+    ws.Range("B2").Value = selectedItem
+    Application.CalculateFull
+    Sheet5.Range("N3:N8").Calculate
+    DoEvents
+    Application.Wait (Now + TimeValue("0:00:01"))
+    DoEvents
+    Debug.Print "Processing item: " & selectedItem
+    Debug.Print "Value in ws.Range('B2'): " & ws.Range("B2").Value
+    Debug.Print "Value in Harvested Data!D5: [" & Worksheets("Harvested Data").Range("D5").Value & "]"
+    ' === State synchronization: END ===
+
+    SaveAlteredWorkbook ws, selectedItem
+
+    ' === MOMENT: Give Excel time to finalize Save/Close before summary row ===
+    DoEvents
+    Worksheets("Harvested Data").Calculate
+    DoEvents
+
+    UpdateOrCreateSummaryRow
+
+Cleanup:
+    Application.ScreenUpdating = False
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+    Application.ScreenUpdating = True
+
+    Debug.Print "ProcessSingle completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    On Error Resume Next
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    On Error GoTo 0
+    MsgBox "An error occurred in ProcessSingle: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessSingle: " & Err.Description & " at line " & Erl
+    GoTo Cleanup
+End Sub
+
+Sub CheckPathCharacters(path As String)
+    Dim i As Integer
+    For i = 1 To Len(path)
+        Debug.Print Mid(path, i, 1) & " - " & Asc(Mid(path, i, 1))
+    Next i
+End Sub
