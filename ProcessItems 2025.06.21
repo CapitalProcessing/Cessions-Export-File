@@ -1,0 +1,159 @@
+Sub ProcessItems()
+    Dim ws As Worksheet
+    Dim itemList As Variant
+    Dim nonEmptyItems() As String
+    Dim i As Integer, itemCount As Integer
+    Dim originalSheet As Worksheet
+    Dim rng As Range
+
+    ' --- Robust error protection: set original sheet first ---
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    Set ws = originalSheet
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessItems"
+
+    ' --- UI: Unhide and switch to the "Processing" sheet, set application states ---
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = False
+        .Calculation = xlCalculationManual
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVisible
+        ThisWorkbook.Sheets("Processing").Activate
+        .DisplayFullScreen = True
+        .DisplayFormulaBar = False
+        .DisplayStatusBar = False
+        .CommandBars("Ribbon").Visible = False
+        .ActiveWindow.DisplayGridlines = False
+    End With
+    DoEvents
+    Debug.Print "Switched to Processing sheet"
+
+    ' --- Retrieve item list from named range "Legal_Name" (restored from Prior Working) ---
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names("Legal_Name").RefersToRange
+    If rng Is Nothing Then
+        MsgBox "The named range 'Legal_Name' does not exist."
+        Debug.Print "Named range 'Legal_Name' does not exist"
+        GoTo Cleanup
+    End If
+    On Error GoTo 0
+    Debug.Print "Named range 'Legal_Name' exists"
+
+    ' Convert the range to an array (restored)
+    itemList = rng.Value
+    Debug.Print "Items retrieved from named range 'Legal_Name'"
+
+    ' Debugging: Print the type and value of itemList
+    Debug.Print "Type of itemList: " & TypeName(itemList)
+    If IsArray(itemList) Then
+        Debug.Print "itemList is an array with " & UBound(itemList, 1) & " rows."
+    Else
+        Debug.Print "itemList is not an array."
+        MsgBox "The named range 'Legal_Name' did not return an array."
+        GoTo Cleanup
+    End If
+
+    ' --- Build nonEmptyItems array (restored) ---
+    itemCount = 0
+    For i = 1 To UBound(itemList, 1)
+        If Trim(itemList(i, 1)) <> "" Then
+            itemCount = itemCount + 1
+            ReDim Preserve nonEmptyItems(1 To itemCount)
+            nonEmptyItems(itemCount) = itemList(i, 1)
+        End If
+    Next i
+    Debug.Print "Non-empty items array created"
+
+    ' Debugging: Print the nonEmptyItems array
+    For i = 1 To itemCount
+        Debug.Print "nonEmptyItems(" & i & "): " & nonEmptyItems(i)
+    Next i
+
+    ' Exit if there are no items
+    If itemCount = 0 Then
+        GoTo Cleanup
+    End If
+
+    ' --- Loop through each non-empty item ---
+    For i = 1 To itemCount
+        ' Update the progress indicator
+        ThisWorkbook.Sheets("Processing").Range("O36").Value = "Processing item " & i & " of " & itemCount
+        DoEvents
+
+        ' Set the drop-down list cell to the current item
+        ws.Range("B2").Value = nonEmptyItems(i)
+
+        ' === State synchronization ===
+        Application.CalculateFull
+        Sheet5.Range("N3:N8").Calculate
+        DoEvents
+        Application.Wait (Now + TimeValue("0:00:01"))
+        DoEvents
+
+        Debug.Print "Processing item: " & nonEmptyItems(i)
+        Debug.Print "Value in ws.Range('B2'): " & ws.Range("B2").Value
+        Debug.Print "Value in Harvested Data!D5: [" & Worksheets("Harvested Data").Range("D5").Value & "]"
+
+        ' Call SaveAlteredWorkbook to handle alterations and saving
+        SaveAlteredWorkbook ws, nonEmptyItems(i)
+
+        ' Give Excel time to finalize Save/Close before summary row
+        DoEvents
+        Worksheets("Harvested Data").Calculate
+        DoEvents
+
+        ' Call summary update (includes stability pause)
+        UpdateOrCreateSummaryRow
+        DoEvents
+    Next i
+    Call SortAndProtectSummary
+
+Cleanup:
+    ' Restore the original view settings and switch back to the original sheet
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = True
+        .Calculation = xlCalculationAutomatic
+        .DisplayFullScreen = False
+        .WindowState = xlMaximized                ' <-- Add this to maximize Excel
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+        .CommandBars("Ribbon").Visible = True
+        If Not originalSheet Is Nothing Then originalSheet.Activate
+        .ActiveWindow.DisplayGridlines = True
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+        .ScreenUpdating = True
+    End With
+
+    ' (Optional) Hide VBA window if visible
+    On Error Resume Next
+    Application.VBE.MainWindow.Visible = False
+    On Error GoTo 0
+
+    ' (Optional) Reset dropdown to first item and force sync for next segment
+    If itemCount > 0 Then ws.Range("B2").Value = nonEmptyItems(1)
+    Application.CalculateFull
+    DoEvents
+
+    Debug.Print "Cleanup complete"
+    Debug.Print "ProcessItems completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.DisplayFullScreen = False
+    Application.DisplayFormulaBar = True
+    Application.DisplayStatusBar = True
+    Application.CommandBars("Ribbon").Visible = True
+    On Error Resume Next
+    If Not originalSheet Is Nothing Then originalSheet.Activate
+    Application.ActiveWindow.DisplayGridlines = True
+    ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    On Error GoTo 0
+    MsgBox "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+    GoTo Cleanup
+End Sub
