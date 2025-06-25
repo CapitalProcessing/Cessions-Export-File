@@ -1,0 +1,321 @@
+Sub UpdateOrCreateSummaryRow()
+    Dim summaryPath As String, summaryFileName As String, summaryFullPath As String
+    Dim wbSummary As Workbook, wsSummary As Worksheet, wsLegend As Worksheet
+    Dim parsedReinsurerName As String, templateType As String
+    Dim nextRow As Long, foundRow As Long
+    Dim alreadyOpen As Boolean
+    Dim cell As Range, wb As Workbook, wsAll As Worksheet
+    Dim wsAllName As String, colLetter As Variant
+
+    Debug.Print "---- UpdateOrCreateSummaryRow START ----"
+
+    summaryPath = ThisWorkbook.Worksheets("RAC").Range("N18").Value
+    summaryFileName = ThisWorkbook.Worksheets("RAC").Range("N19").Value
+    summaryFullPath = summaryPath & "\" & summaryFileName
+
+    parsedReinsurerName = ThisWorkbook.Worksheets("Harvested Data").Range("B5").Value
+
+    Dim cloudAdminName As String
+    cloudAdminName = ThisWorkbook.Worksheets("Auto").Range("B2").Value
+
+    templateType = ThisWorkbook.Worksheets("Auto").Range("H3").Value
+
+    Debug.Print "parsedReinsurerName (for output): [" & parsedReinsurerName & "]"
+    Debug.Print "cloudAdminName (for lookup): [" & cloudAdminName & "]"
+    Debug.Print "templateType: " & templateType
+
+    If templateType = "Test" Or templateType = "Not Reported" Then
+        Debug.Print "Exiting: Template type is '" & templateType & "'"
+        Exit Sub
+    End If
+
+    Debug.Print "Ensuring directory exists..."
+    Call CreateDirectoryPath(summaryPath)
+    Debug.Print "Directory check done."
+
+    wsAllName = ThisWorkbook.Worksheets("Harvested Data").Range("D5").Value
+    Debug.Print "wsAllName from Harvested Data!D5: '" & wsAllName & "'"
+    If wsAllName = "" Then
+        MsgBox "The current 'All' worksheet name is blank. Please check cell Harvested Data!D5.", vbExclamation
+        Exit Sub
+    End If
+    On Error Resume Next
+    Set wsAll = ThisWorkbook.Worksheets(wsAllName)
+    On Error GoTo 0
+    If wsAll Is Nothing Then
+        MsgBox "Worksheet '" & wsAllName & "' does not exist!", vbExclamation
+        Exit Sub
+    End If
+
+    Dim wsLists As Worksheet
+    Dim employeeName As String
+    Dim listsLastRow As Long
+    Dim i As Long
+
+    Set wsLists = ThisWorkbook.Worksheets("Lists")
+    listsLastRow = wsLists.Cells(wsLists.Rows.Count, "B").End(xlUp).Row
+    employeeName = ""
+
+    For i = 4 To listsLastRow
+        If Trim(wsLists.Cells(i, "B").Value) = Trim(cloudAdminName) Then
+            employeeName = wsLists.Cells(i, "A").Value
+            Debug.Print "Employee found: [" & employeeName & "] in row " & i
+            Exit For
+        End If
+    Next i
+
+    If employeeName = "" Then
+        Debug.Print "No employee found for reinsurer: [" & cloudAdminName & "]"
+    End If
+
+    alreadyOpen = False
+    Set wbSummary = Nothing
+    For Each wb In Workbooks
+        If StrComp(wb.FullName, summaryFullPath, vbTextCompare) = 0 Then
+            Set wbSummary = wb
+            alreadyOpen = True
+            Exit For
+        End If
+    Next wb
+
+    If wbSummary Is Nothing Then
+        On Error Resume Next
+        Set wbSummary = Workbooks.Open(summaryFullPath)
+        On Error GoTo 0
+    End If
+
+    If wbSummary Is Nothing Then
+        Set wbSummary = Workbooks.Add
+        Set wsSummary = wbSummary.Sheets(1)
+        wsSummary.Name = "Summary"
+        wsSummary.Range("A1").Value = "Monthly Cession File " & Format(ThisWorkbook.Worksheets("Auto").Range("H2").Value, "yyyy.mm")
+        wsSummary.Range("D1").Value = "(Bal Sheet)"
+        wsSummary.Range("E1").Value = "(Bal & P&L)"
+        wsSummary.Range("F1").Value = "(Bal Sheet)"
+        wsSummary.Range("G1").Value = "(Bal & P&L)"
+        wsSummary.Range("I1").Value = "(P&L Side)"
+        wsSummary.Range("A2").Value = "Assigned"
+        wsSummary.Range("B2").Value = "Reinsurer"
+        wsSummary.Range("C2").Value = "QB Total"
+        wsSummary.Range("D2").Value = "Funding"
+        wsSummary.Range("E2").Value = "Clip Fee"
+        wsSummary.Range("F2").Value = "Pending Claims"
+        wsSummary.Range("G2").Value = "Ceding Fee"
+        wsSummary.Range("H2").Value = "Variance"
+        wsSummary.Range("I2").Value = "Paid Claims"
+        nextRow = 3
+    Else
+        Set wsSummary = wbSummary.Sheets(1)
+        ' *** UNPROTECT SHEET BEFORE WRITING ***
+        On Error Resume Next
+        wsSummary.Unprotect password:="yourpassword"
+        On Error GoTo 0
+        foundRow = 0
+        For Each cell In wsSummary.Range("B3:B" & wsSummary.Cells(wsSummary.Rows.Count, "B").End(xlUp).Row)
+            If Trim(cell.Value) = Trim(parsedReinsurerName) And Trim(parsedReinsurerName) <> "" Then
+                foundRow = cell.Row
+                Exit For
+            End If
+        Next cell
+        If foundRow > 0 Then
+            nextRow = foundRow
+        Else
+            nextRow = wsSummary.Cells(wsSummary.Rows.Count, "B").End(xlUp).Row + 1
+            If nextRow < 3 Then nextRow = 3
+        End If
+    End If
+
+    Const legendSheetName As String = "Legend"
+    Dim legendLastRow As Long
+    Dim empColor As Long
+
+        ' 1 - Muted green
+        ' 2 - Soft yellow
+        ' 3 - Muted blue
+        ' 4 - Muted red
+        ' 5 - Muted orange
+        ' 6 - Muted purple
+        ' 7 - Muted cyan
+        ' 8 - Muted magenta
+        ' 9 - Deep green
+        '10 - Muted dark orange
+        '11 - Muted indigo
+        '12 - Muted pink
+    
+    Dim colorPalette As Variant
+    colorPalette = Array( _
+    RGB(140, 180, 110), _
+    RGB(240, 205, 90), _
+    RGB(120, 160, 220), _
+    RGB(220, 120, 120), _
+    RGB(240, 170, 90), _
+    RGB(170, 120, 220), _
+    RGB(80, 180, 180), _
+    RGB(210, 130, 210), _
+    RGB(80, 140, 110), _
+    RGB(230, 130, 80), _
+    RGB(100, 120, 210), _
+    RGB(180, 70, 130) _
+)
+    On Error Resume Next
+    Set wsLegend = wbSummary.Worksheets(legendSheetName)
+    On Error GoTo 0
+
+    If wsLegend Is Nothing Then
+        Set wsLegend = wbSummary.Worksheets.Add(After:=wbSummary.Sheets(wbSummary.Sheets.Count))
+        wsLegend.Name = legendSheetName
+        wsLegend.Visible = xlSheetVisible
+        wsLegend.Range("A1").Value = "Employee"
+        wsLegend.Range("B1").Value = "ColorIdx"
+        wsLegend.Range("C1").Value = "Sample"
+    End If
+
+    With wsLegend
+        .Columns("A").ColumnWidth = 22
+        .Columns("B").ColumnWidth = 10
+        .Columns("C").ColumnWidth = 12
+        With .Range("A1:C1")
+            .Font.Bold = True
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+        End With
+        .Range("A:A").HorizontalAlignment = xlCenter
+        .Range("B:B").HorizontalAlignment = xlCenter
+        .Range("C:C").HorizontalAlignment = xlCenter
+    End With
+
+    legendLastRow = wsLegend.Cells(wsLegend.Rows.Count, "A").End(xlUp).Row
+    Dim foundLegendRow As Long
+    foundLegendRow = 0
+
+    For i = 2 To legendLastRow
+        If wsLegend.Cells(i, "A").Value = employeeName Then
+            foundLegendRow = i
+            Exit For
+        End If
+    Next i
+
+    If foundLegendRow = 0 Then
+        legendLastRow = legendLastRow + 1
+        wsLegend.Cells(legendLastRow, "A").Value = employeeName
+        wsLegend.Cells(legendLastRow, "B").Value = (legendLastRow - 2) Mod (UBound(colorPalette) + 1)
+        foundLegendRow = legendLastRow
+    End If
+
+    wsLegend.Cells(foundLegendRow, "C").Interior.Color = colorPalette(wsLegend.Cells(foundLegendRow, "B").Value)
+    wsLegend.Cells(foundLegendRow, "C").Value = "" ' Just a sample cell for color
+    wsLegend.Range("A" & foundLegendRow & ":C" & foundLegendRow).HorizontalAlignment = xlCenter
+    empColor = colorPalette(wsLegend.Cells(foundLegendRow, "B").Value)
+
+    wsSummary.Range("A" & nextRow & ":B" & nextRow).Interior.Color = empColor
+    wsSummary.Range("D" & nextRow & ":I" & nextRow).Interior.Color = empColor
+    wsSummary.Range("C" & nextRow).Interior.ColorIndex = xlNone
+
+    With wsSummary.Range("A" & nextRow)
+        .Font.Name = "Aptos"
+        .Font.Size = 11
+        .Font.Bold = False
+        .HorizontalAlignment = xlCenter
+    End With
+
+    wsSummary.Range("B" & nextRow).Value = parsedReinsurerName
+    wsSummary.Range("C" & nextRow).Value = ""
+    wsSummary.Range("D" & nextRow).Value = wsAll.Range("F20").Value
+    wsSummary.Range("E" & nextRow).Value = wsAll.Range("F14").Value
+    wsSummary.Range("F" & nextRow).Value = wsAll.Range("F16").Value
+    wsSummary.Range("G" & nextRow).Value = wsAll.Range("F15").Value
+    wsSummary.Range("H" & nextRow).Formula = "=IF(C" & nextRow & "="""","""",(G" & nextRow & "+F" & nextRow & "+E" & nextRow & "+D" & nextRow & ")-C" & nextRow & ")"
+    wsSummary.Range("I" & nextRow).Value = wsAll.Range("F17").Value
+
+    With wsSummary
+        .Columns("A").ColumnWidth = 22
+        .Columns("B").ColumnWidth = 60
+        .Columns("C:I").ColumnWidth = 15
+        With .Range("A1")
+            .Font.Name = "Aptos"
+            .Font.Size = 11
+            .Font.Bold = True
+            .HorizontalAlignment = xlLeft
+        End With
+        For Each colLetter In Array("D", "E", "F", "G", "I")
+            With .Range(colLetter & "1")
+                .Font.Name = "Aptos"
+                .Font.Size = 8
+                .Font.Italic = True
+                .HorizontalAlignment = xlCenter
+            End With
+        Next colLetter
+        With .Range("A2")
+            .Font.Name = "Aptos"
+            .Font.Size = 11
+            .Font.Bold = True
+            .HorizontalAlignment = xlCenter
+        End With
+        For Each colLetter In Array("B", "C", "D", "E", "F", "G", "H", "I")
+            With .Range(colLetter & "2")
+                .Font.Name = "Aptos"
+                .Font.Size = 11
+                .Font.Bold = True
+                .HorizontalAlignment = xlCenter
+            End With
+        Next colLetter
+        With .Range("B" & nextRow)
+            .Font.Name = "Aptos"
+            .Font.Size = 11
+            .Font.Bold = False
+            .HorizontalAlignment = xlLeft
+            .NumberFormat = "$#,##0.00"
+        End With
+        For Each colLetter In Array("C", "D", "E", "F", "G", "H", "I")
+            With .Range(colLetter & nextRow)
+                .Font.Name = "Aptos"
+                .Font.Size = 11
+                .Font.Bold = False
+                .HorizontalAlignment = xlCenter
+                .NumberFormat = "$#,##0.00"
+            End With
+        Next colLetter
+    End With
+
+    Application.DisplayAlerts = False
+    wbSummary.SaveAs summaryFullPath
+    If Not alreadyOpen Then
+        wbSummary.Close SaveChanges:=False
+    End If
+    Application.DisplayAlerts = True
+    Debug.Print "---- UpdateOrCreateSummaryRow END ----"
+End Sub
+Sub SortAndProtectSummary()
+    Dim summaryPath As String, summaryFileName As String, summaryFullPath As String
+    Dim wbSummary As Workbook, wsSummary As Worksheet
+    Dim lastRow As Long
+
+    summaryPath = ThisWorkbook.Worksheets("RAC").Range("N18").Value
+    summaryFileName = ThisWorkbook.Worksheets("RAC").Range("N19").Value
+    summaryFullPath = summaryPath & "\" & summaryFileName
+
+    Set wbSummary = Workbooks.Open(summaryFullPath)
+    Set wsSummary = wbSummary.Sheets(1) ' Adjust if needed
+
+    lastRow = wsSummary.Cells(wsSummary.Rows.Count, "A").End(xlUp).Row
+
+    ' Sort by Employee Name
+    With wsSummary.Sort
+        .SortFields.Clear
+        .SortFields.Add Key:=wsSummary.Range("A3:A" & lastRow), Order:=xlAscending
+        .SetRange wsSummary.Range("A2:I" & lastRow)
+        .Header = xlYes
+        .Apply
+    End With
+
+    ' Unlock Col C for data entry, lock others
+    wsSummary.Range("C3:C" & lastRow).Locked = False
+    wsSummary.Range("A3:B" & lastRow).Locked = True
+    wsSummary.Range("D3:I" & lastRow).Locked = True
+
+    wsSummary.Protect password:="yourpassword", UserInterfaceOnly:=True
+
+    wbSummary.Save
+    wbSummary.Close SaveChanges:=False
+End Sub
+
