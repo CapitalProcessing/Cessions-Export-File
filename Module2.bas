@@ -1,5 +1,5 @@
 Attribute VB_Name = "Module2"
-Sub ProcessItems()
+Sub ProcessTemplate()
     Dim ws As Worksheet
     Dim itemList As Variant
     Dim nonEmptyItems() As String
@@ -8,7 +8,7 @@ Sub ProcessItems()
     Dim rng As Range
 
     On Error GoTo ErrorHandler
-    Debug.Print "Starting ProcessItems"
+    Debug.Print "Starting ProcessTemplate"
 
     ' Unhide and switch to the "Processing" sheet
     With Application
@@ -75,6 +75,60 @@ Sub ProcessItems()
         Debug.Print "nonEmptyItems(" & i & "): " & nonEmptyItems(i)
     Next i
 
+    ' Exit if there are no items
+    If itemCount = 0 Then
+        GoTo Cleanup
+    End If
+
+    ' Call ProcessItems to handle item-wise processing
+    ProcessItems ws, nonEmptyItems
+
+Cleanup:
+    ' Restore the original view settings and switch back to the original sheet
+    With Application
+        .ScreenUpdating = False
+        .EnableEvents = True
+        .Calculation = xlCalculationAutomatic
+        .DisplayFullScreen = False
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+        .CommandBars("Ribbon").Visible = True
+        originalSheet.Activate
+        .ActiveWindow.DisplayGridlines = True
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
+        .ScreenUpdating = True
+    End With
+    Debug.Print "ProcessTemplate completed"
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    With Application
+        .EnableEvents = True
+        .Calculation = xlCalculationAutomatic
+        .DisplayFullScreen = False
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+        .CommandBars("Ribbon").Visible = True
+        originalSheet.Activate
+        .ActiveWindow.DisplayGridlines = True
+        ThisWorkbook.Sheets("Processing").Visible = xlSheetVeryHidden
+    End With
+    MsgBox "An error occurred in ProcessTemplate: " & Err.Description & " at line " & Erl
+    Debug.Print "An error occurred in ProcessTemplate: " & Err.Description & " at line " & Erl
+End Sub
+
+Sub ProcessItems(ws As Worksheet, nonEmptyItems() As String)
+    Dim i As Integer, itemCount As Integer
+    Dim originalSheet As Worksheet
+
+    On Error GoTo ErrorHandler
+    Debug.Print "Starting ProcessItems"
+
+    ' Store the original sheet
+    Set originalSheet = ThisWorkbook.Sheets("Auto")
+    itemCount = UBound(nonEmptyItems)
+
     ' Loop through each non-empty item
     For i = 1 To itemCount
         ' Update the progress indicator
@@ -104,21 +158,6 @@ Sub ProcessItems()
         SaveAlteredWorkbook ws, nonEmptyItems(i)
     Next i
 
-Cleanup:
-    ' Restore the original view settings and switch back to the original sheet
-    With Application
-        .ScreenUpdating = False
-        .EnableEvents = True
-        .Calculation = xlCalculationAutomatic
-        .DisplayFullScreen = False
-        .DisplayFormulaBar = True
-        .DisplayStatusBar = True
-        .CommandBars("Ribbon").Visible = True
-        originalSheet.Activate
-        .ActiveWindow.DisplayGridlines = True
-        ThisWorkbook.Sheets("Processing").Visible = xlSheetHidden
-        .ScreenUpdating = True
-    End With
     Debug.Print "ProcessItems completed"
     Exit Sub
 
@@ -137,6 +176,11 @@ ErrorHandler:
     End With
     MsgBox "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
     Debug.Print "An error occurred in ProcessItems: " & Err.Description & " at line " & Erl
+End Sub
+
+' Backward compatibility wrapper - calls ProcessTemplate
+Sub ProcessItemsOriginal()
+    ProcessTemplate
 End Sub
 Function CleanString(inputString As String) As String
     Dim cleanedString As String
@@ -673,16 +717,16 @@ Sub CreateButtons()
         End If
     Next btn
 
-    ' Add a new button at K20 for ProcessItems
+    ' Add a new button at K20 for ProcessTemplate
     Set btn = ws.OLEObjects.Add(ClassType:="Forms.CommandButton.1", _
                                 Left:=ws.Range("K20").Left, _
                                 Top:=ws.Range("K20").Top, _
                                 Width:=ws.Range("K20").Width * 1.5, _
                                 Height:=ws.Range("K20").Height * 2.5) ' Make the button twice as tall
     With btn.Object
-        .Caption = "Run ProcessItems"
+        .Caption = "Run ProcessTemplate"
     End With
-    btn.Name = "btnProcessItems"
+    btn.Name = "btnProcessTemplate"
 
     ' Add a new button at K24 for ProcessSingle
     Set btn = ws.OLEObjects.Add(ClassType:="Forms.CommandButton.1", _
@@ -698,12 +742,12 @@ Sub CreateButtons()
     ' Get the code module for the worksheet
     Set codeModule = ThisWorkbook.VBProject.VBComponents(ws.CodeName).codeModule
 
-    ' Check if the event handler for btnProcessItems_Click already exists
-    If Not EventHandlerExists(codeModule, "btnProcessItems_Click") Then
-        ' Add the event handler for btnProcessItems_Click
+    ' Check if the event handler for btnProcessTemplate_Click already exists
+    If Not EventHandlerExists(codeModule, "btnProcessTemplate_Click") Then
+        ' Add the event handler for btnProcessTemplate_Click
         lineNum = codeModule.CountOfLines + 1
-        code = "Private Sub btnProcessItems_Click()" & vbCrLf & _
-               "    ProcessItems" & vbCrLf & _
+        code = "Private Sub btnProcessTemplate_Click()" & vbCrLf & _
+               "    ProcessTemplate" & vbCrLf & _
                "End Sub"
         codeModule.InsertLines lineNum, code
     End If
